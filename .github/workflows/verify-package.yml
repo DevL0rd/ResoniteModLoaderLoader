@@ -1,0 +1,27 @@
+name: Verify Package
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Build and verify both packages
+        shell: pwsh
+        run: |
+          ./scripts/build.ps1 -Configuration Release -NoDeploy
+          ./scripts/package.ps1 -Configuration Release -Package All

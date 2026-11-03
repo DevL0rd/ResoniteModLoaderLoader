@@ -93,9 +93,8 @@ function New-ZipFromStage {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::Open($OutZip, [System.IO.Compression.ZipArchiveMode]::Create)
     try {
-        $stageRoot = $Stage.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
         foreach ($file in Get-ChildItem -LiteralPath $Stage -Recurse -File) {
-            $entryName = $file.FullName.Substring($stageRoot.Length).Replace('\', '/')
+            $entryName = [IO.Path]::GetRelativePath($Stage, $file.FullName).Replace('\', '/')
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                 $archive,
                 $file.FullName,
@@ -108,10 +107,42 @@ function New-ZipFromStage {
     }
 }
 
+function Assert-ZipEntries {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string[]]$RequiredEntries
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+    }
+    finally {
+        $archive.Dispose()
+    }
+
+    Write-Host "Package entries in ${ZipPath}:"
+    $entries | ForEach-Object { Write-Host "  $_" }
+
+    foreach ($entry in $entries) {
+        if ($entry.Contains('\') -or $entry.StartsWith('/')) {
+            throw "Invalid zip entry name '$entry' in $ZipPath"
+        }
+    }
+
+    foreach ($required in $RequiredEntries) {
+        if ($entries -notcontains $required) {
+            throw "Package is missing required entry '$required': $ZipPath"
+        }
+    }
+}
+
 function New-PackageStage {
     param([Parameter(Mandatory)][string]$Name)
 
-    $stage = Join-Path $env:TEMP "ResoniteModLoaderLoaderPackage\$Name"
+    $stage = Join-Path $Root "build\stage\$Name"
     if (Test-Path -LiteralPath $stage) {
         Remove-Item -LiteralPath $stage -Recurse -Force
     }
@@ -170,6 +201,8 @@ function Build-ManualPackage {
 
     New-ZipFromStage -Stage $stage -OutZip $outZip
     Remove-Item -LiteralPath $stage -Recurse -Force
+    $manualBase = "BepInEx/plugins/$namespace-$mainName"
+    Assert-ZipEntries -ZipPath $outZip -RequiredEntries @("$manualBase/manifest.json", "$manualBase/README.md", "$manualBase/icon.png", "$manualBase/ResoniteModLoaderLoader/ResoniteModLoaderLoader.dll")
     Write-Host "Done: $outZip (manual profile-root package layout)"
 }
 
@@ -200,15 +233,11 @@ function Build-MainThunderstorePackage {
 
     New-ZipFromStage -Stage $stage -OutZip $outZip
     Remove-Item -LiteralPath $stage -Recurse -Force
+    Assert-ZipEntries -ZipPath $outZip -RequiredEntries @("manifest.json", "README.md", "icon.png", "CHANGELOG.md", "plugins/ResoniteModLoaderLoader/ResoniteModLoaderLoader.dll")
     Write-Host "Done: $outZip (Thunderstore main package)"
 }
 
 Assert-SemVer -Name "VERSION" -Value $version
-
-$tomlVersion = Get-TomlString $toml "versionNumber"
-if ($tomlVersion -ne $version) {
-    throw "VERSION ($version) does not match thunderstore.toml versionNumber ($tomlVersion). Run scripts\sync-version.ps1."
-}
 
 switch ($Package) {
     "Manual" { Build-ManualPackage }

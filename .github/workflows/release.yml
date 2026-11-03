@@ -16,6 +16,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync thunderstore.toml version
+        shell: pwsh
+        run: ./scripts/sync-version.ps1
+
       - name: Get release version
         id: version
         shell: pwsh
@@ -25,18 +29,22 @@ jobs:
             throw "VERSION must be semantic Major.Minor.Patch for releases. Current value: '$version'"
           }
 
-          $toml = Get-Content -Raw thunderstore.toml
-          $match = [regex]::Match($toml, 'versionNumber\s*=\s*"([^"]+)"')
-          if (-not $match.Success) {
-            throw "versionNumber was not found in thunderstore.toml"
-          }
-          if ($match.Groups[1].Value -ne $version) {
-            throw "VERSION ($version) does not match thunderstore.toml versionNumber ($($match.Groups[1].Value))"
-          }
-
           echo "version=$version" >> $env:GITHUB_OUTPUT
           echo "tag=v$version" >> $env:GITHUB_OUTPUT
           echo "name=Resonite Mod Loader Loader $version" >> $env:GITHUB_OUTPUT
+
+      - name: Commit synced thunderstore.toml
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          git diff --quiet -- thunderstore.toml
+          if ($LASTEXITCODE -ne 0) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add thunderstore.toml
+            git commit -m "Sync thunderstore.toml version to $(Get-Content -Raw VERSION | ForEach-Object Trim) [skip ci]"
+            git push origin HEAD:main
+          }
 
       - uses: actions/setup-dotnet@v4
         with:
